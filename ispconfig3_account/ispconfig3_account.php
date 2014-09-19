@@ -79,6 +79,10 @@ class ispconfig3_account extends rcube_plugin
             } catch (SoapFault $e)
             {
                 $this->rcmail_inst->output->command('display_message', 'Soap Error: ' . $e->getMessage(), 'error');
+		error_log('soap error template_object_identify_form : ' . $e->getMessage());
+		error_log('url : ' . $this->rcmail_inst->config->get('soap_url'));
+		error_log('url : ' . $this->rcmail_inst->config->get('remote_soap_user'));
+		error_log('url : ' . $this->rcmail_inst->config->get('remote_soap_pass'));
             }
             if (version_compare(RCMAIL_VERSION, '0.7.0') <= 0)
             {
@@ -177,6 +181,10 @@ class ispconfig3_account extends rcube_plugin
         } catch (SoapFault $e)
         {
             $this->rcmail_inst->output->command('display_message', 'Soap Error: ' . $e->getMessage(), 'error');
+               error_log('soap error gen_form : ' . $e->getMessage());
+                error_log('url : ' . $this->rcmail_inst->config->get('soap_url'));
+                error_log('url : ' . $this->rcmail_inst->config->get('remote_soap_user'));
+                error_log('url : ' . $this->rcmail_inst->config->get('remote_soap_pass'));
         }
         $out .= "<div id=\"alias-cont\">" . $alias_table->show() . "</div>\n";
         $out .= "</fieldset></form>\n";
