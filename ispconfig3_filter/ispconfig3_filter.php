@@ -2,17 +2,27 @@
 class ispconfig3_filter extends rcube_plugin
 {
     public $task = 'settings';
-    private $soap = null;
-    private $rcmail_inst = null;
-    private $required_plugins = array('ispconfig3_account');
+    private $soap;
+    private $rcmail_inst;
 
     function init()
     {
         $this->rcmail_inst = rcmail::get_instance();
         $this->load_config();
         $this->add_texts('localization/', true);
-        $this->soap = new SoapClient(null, array('location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
-                                                 'uri'      => $this->rcmail_inst->config->get('soap_url')));
+        $this->require_plugin('ispconfig3_account');
+
+        $this->soap = new SoapClient(null, array(
+            'location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
+            'uri' => $this->rcmail_inst->config->get('soap_url'),
+            'stream_context' => stream_context_create(array(
+                'ssl' => array(
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true
+                )
+            ))
+        ));
 
         $this->register_action('plugin.ispconfig3_filter', array($this, 'init_html'));
         $this->register_action('plugin.ispconfig3_filter.show', array($this, 'init_html'));
@@ -32,18 +42,18 @@ class ispconfig3_filter extends rcube_plugin
         $this->rcmail_inst->output->send('ispconfig3_filter.filter');
     }
 
-    function load_config()
+    function load_config($fname = 'config.inc.php')
     {
-        $config = $this->home . '/config/config.inc.php';
+        $config = $this->home . '/config/' . $fname;
         if (file_exists($config))
         {
             if (!$this->rcmail_inst->config->load_from_file($config))
-                raise_error(array('code' => 527, 'type' => 'php', 'message' => "Failed to load config from $config"), true, false);
+                rcube::raise_error(array('code' => 527, 'type' => 'php', 'file' => __FILE__, 'line' => __LINE__, 'message' => "Failed to load config from $config"), true, false);
         }
         else if (file_exists($config . ".dist"))
         {
             if (!$this->rcmail_inst->config->load_from_file($config . '.dist'))
-                raise_error(array('code' => 527, 'type' => 'php', 'message' => "Failed to load config from $config"), true, false);
+                rcube::raise_error(array('code' => 527, 'type' => 'php', 'file' => __FILE__, 'line' => __LINE__, 'message' => "Failed to load config from $config"), true, false);
         }
     }
 
@@ -54,7 +64,7 @@ class ispconfig3_filter extends rcube_plugin
 
     function del()
     {
-        $id = get_input_value('_id', RCUBE_INPUT_GET);
+        $id = rcube_utils::get_input_value('_id', rcube_utils::INPUT_GET);
 
         if ($id != 0 || $id != '')
         {
@@ -81,14 +91,14 @@ class ispconfig3_filter extends rcube_plugin
 
     function save()
     {
-        $id = get_input_value('_id', RCUBE_INPUT_POST);
-        $name = get_input_value('_filtername', RCUBE_INPUT_POST);
-        $source = get_input_value('_filtersource', RCUBE_INPUT_POST);
-        $op = get_input_value('_filterop', RCUBE_INPUT_POST);
-        $searchterm = get_input_value('_filtersearchterm', RCUBE_INPUT_POST);
-        $action = get_input_value('_filteraction', RCUBE_INPUT_POST);
-        $target = get_input_value('_filtertarget', RCUBE_INPUT_POST);
-        $enabled = get_input_value('_filterenabled', RCUBE_INPUT_POST);
+        $id = rcube_utils::get_input_value('_id', rcube_utils::INPUT_POST);
+        $name = rcube_utils::get_input_value('_filtername', rcube_utils::INPUT_POST);
+        $source = rcube_utils::get_input_value('_filtersource', rcube_utils::INPUT_POST);
+        $op = rcube_utils::get_input_value('_filterop', rcube_utils::INPUT_POST);
+        $searchterm = rcube_utils::get_input_value('_filtersearchterm', rcube_utils::INPUT_POST);
+        $action = rcube_utils::get_input_value('_filteraction', rcube_utils::INPUT_POST);
+        $target = mb_convert_encoding(rcube_utils::get_input_value('_filtertarget', rcube_utils::INPUT_POST), 'UTF-8', 'UTF7-IMAP');
+        $enabled = rcube_utils::get_input_value('_filterenabled', rcube_utils::INPUT_POST);
 
         if (!$enabled)
             $enabled = 'n';
@@ -159,8 +169,8 @@ class ispconfig3_filter extends rcube_plugin
 
     function gen_form()
     {
-        $this->rcmail_inst->imap_connect(true);
-        $id = get_input_value('_id', RCUBE_INPUT_GET);
+        $this->rcmail_inst->storage_connect();
+        $id = rcube_utils::get_input_value('_id', rcube_utils::INPUT_GET);
 
         $this->rcmail_inst->output->add_label('ispconfig3_filter.filterdelconfirm');
 
@@ -195,6 +205,7 @@ class ispconfig3_filter extends rcube_plugin
 
             if ($mail_server['mail_filter_syntax'] == 'maildrop')
                 $filter[0]['target'] = "INBOX." . $filter[0]['target'];
+            $filter[0]['target'] = mb_convert_encoding($filter[0]['target'], 'UTF7-IMAP', 'UTF-8');
         }
 
         if ($enabled == 'y')
@@ -204,7 +215,7 @@ class ispconfig3_filter extends rcube_plugin
 
         $this->rcmail_inst->output->set_env('framed', true);
 
-        $out .= '<fieldset><legend>' . $this->gettext('acc_filter') . '</legend>' . "\n";
+        $out = '<fieldset><legend>' . $this->gettext('acc_filter') . '</legend>' . "\n";
 
         $table = new html_table(array('cols' => 2, 'class' => 'propform'));
 
@@ -212,7 +223,7 @@ class ispconfig3_filter extends rcube_plugin
         $out .= $hidden_id->show();
 
         $input_filtername = new html_inputfield(array('name' => '_filtername', 'id' => 'filtername', 'size' => 70));
-        $table->add('title', rep_specialchars_output($this->gettext('filtername')));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('filtername')));
         $table->add('', $input_filtername->show($filter[0]['rulename']));
 
         $input_filtersource = new html_select(array('name' => '_filtersource', 'id' => 'filtersource'));
@@ -220,17 +231,17 @@ class ispconfig3_filter extends rcube_plugin
         $input_filterop = new html_select(array('name' => '_filterop', 'id' => 'filterop'));
         $input_filterop->add(array($this->gettext('filtercontains'), $this->gettext('filteris'), $this->gettext('filterbegins'), $this->gettext('filterends')), array('contains', 'is', 'begins', 'ends'));
         $input_filtersearchterm = new html_inputfield(array('name' => '_filtersearchterm', 'id' => 'filtersearchterm', 'size' => 43));
-        $table->add('title', rep_specialchars_output($this->gettext('filtersource')));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('filtersource')));
         $table->add('', $input_filtersource->show($filter[0]['source']) . $input_filterop->show($filter[0]['op']) . $input_filtersearchterm->show($filter[0]['searchterm']));
 
         $input_filteraction = new html_select(array('name' => '_filteraction', 'id' => 'filteraction'));
         $input_filteraction->add(array($this->gettext('filtermove'), $this->gettext('filterdelete')), array('move', 'delete'));
-        $input_filtertarget = rcmail_mailbox_select(array('name' => '_filtertarget', 'id' => 'filtertarget'));
-        $table->add('title', rep_specialchars_output($this->gettext('filteraction')));
+        $input_filtertarget = $this->rcmail_inst->folder_selector(array('name' => '_filtertarget', 'id' => 'filtertarget'));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('filteraction')));
         $table->add('', $input_filteraction->show($filter[0]['action']) . $input_filtertarget->show($filter[0]['target']));
 
         $input_filterenabled = new html_checkbox(array('name' => '_filterenabled', 'id' => 'filterenabled', 'value' => '1'));
-        $table->add('title', rep_specialchars_output($this->gettext('filterenabled')));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('filterenabled')));
         $table->add('', $input_filterenabled->show($enabled));
 
         $out .= $table->show();
@@ -256,12 +267,13 @@ class ispconfig3_filter extends rcube_plugin
             $mail_user = $this->soap->mail_user_get($session_id, array('login' => $this->rcmail_inst->user->data['username']));
             $filter = $this->soap->mail_user_filter_get($session_id, array('mailuser_id' => $mail_user[0]['mailuser_id']));
             $this->soap->logout($session_id);
+            $class = 'odd';
 
             for ($i = 0; $i < count($filter); $i++)
             {
                 $class = ($class == 'odd' ? 'even' : 'odd');
 
-                if ($filter[$i]['filter_id'] == get_input_value('_id', RCUBE_INPUT_GET))
+                if ($filter[$i]['filter_id'] == rcube_utils::get_input_value('_id', rcube_utils::INPUT_GET))
                     $class = 'selected';
 
                 $rule_table->set_row_attribs(array('class' => $class, 'id' => 'rule_' . $filter[$i]['filter_id']));
@@ -274,7 +286,7 @@ class ispconfig3_filter extends rcube_plugin
 
         if (count($filter) == 0)
         {
-            $rule_table->add(array('colspan' => '3'), rep_specialchars_output($this->gettext('filternorules')));
+            $rule_table->add(array('colspan' => '3'), rcube_utils::rep_specialchars_output($this->gettext('filternorules')));
             $rule_table->set_row_attribs(array('class' => 'odd'));
             $rule_table->add_row();
         }
@@ -308,5 +320,3 @@ class ispconfig3_filter extends rcube_plugin
         return $rule_table;
     }
 }
-
-?>

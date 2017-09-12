@@ -2,33 +2,43 @@
 class ispconfig3_autoselect extends rcube_plugin
 {
     public $task = 'login|logout';
-    private $soap = null;
-    private $rcmail_inst = null;
+    private $soap;
+    private $rcmail_inst;
 
     function init()
     {
         $this->rcmail_inst = rcmail::get_instance();
         $this->load_config();
         $this->load_con_config();
-        $this->soap = new SoapClient(null, array('location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
-                                                 'uri'      => $this->rcmail_inst->config->get('soap_url')));
+
+        $this->soap = new SoapClient(null, array(
+            'location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
+            'uri' => $this->rcmail_inst->config->get('soap_url'),
+            'stream_context' => stream_context_create(array(
+                'ssl' => array(
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true
+                )
+            ))
+        ));
 
         $this->add_hook('authenticate', array($this, 'authenticate'));
         $this->add_hook('template_object_loginform', array($this, 'template_object_loginform'));
     }
 
-    function load_config()
+    function load_config($fname = 'config.inc.php')
     {
-        $config = $this->home . '/config/config.inc.php';
+        $config = $this->home . '/config/' . $fname;
         if (file_exists($config))
         {
             if (!$this->rcmail_inst->config->load_from_file($config))
-                raise_error(array('code' => 527, 'type' => 'php', 'message' => "Failed to load config from $config"), true, false);
+                rcube::raise_error(array('code' => 527, 'type' => 'php', 'file' => __FILE__, 'line' => __LINE__, 'message' => "Failed to load config from $config"), true, false);
         }
         else if (file_exists($config . ".dist"))
         {
             if (!$this->rcmail_inst->config->load_from_file($config . '.dist'))
-                raise_error(array('code' => 527, 'type' => 'php', 'message' => "Failed to load config from $config"), true, false);
+                rcube::raise_error(array('code' => 527, 'type' => 'php', 'file' => __FILE__, 'line' => __LINE__, 'message' => "Failed to load config from $config"), true, false);
         }
     }
 
@@ -38,12 +48,12 @@ class ispconfig3_autoselect extends rcube_plugin
         if (file_exists($config))
         {
             if (!$this->rcmail_inst->config->load_from_file($config))
-                raise_error(array('code' => 527, 'type' => 'php', 'message' => "Failed to load config from $config"), true, false);
+                rcube::raise_error(array('code' => 527, 'type' => 'php', 'file' => __FILE__, 'line' => __LINE__, 'message' => "Failed to load config from $config"), true, false);
         }
         else if (file_exists($config . ".dist"))
         {
             if (!$this->rcmail_inst->config->load_from_file($config . '.dist'))
-                raise_error(array('code' => 527, 'type' => 'php', 'message' => "Failed to load config from $config"), true, false);
+                rcube::raise_error(array('code' => 527, 'type' => 'php', 'file' => __FILE__, 'line' => __LINE__, 'message' => "Failed to load config from $config"), true, false);
         }
     }
 
@@ -56,8 +66,8 @@ class ispconfig3_autoselect extends rcube_plugin
 
     function authenticate($args)
     {
-        if (isset($_POST['_user']) && isset($_POST['_pass']))
-            $args['host'] = $this->getHost(get_input_value('_user', RCUBE_INPUT_POST));
+        if (isset($_POST['_user'], $_POST['_pass']))
+            $args['host'] = $this->getHost(rcube_utils::get_input_value('_user', rcube_utils::INPUT_POST));
 
         return $args;
     }
@@ -86,5 +96,3 @@ class ispconfig3_autoselect extends rcube_plugin
         return $host;
     }
 }
-
-?>

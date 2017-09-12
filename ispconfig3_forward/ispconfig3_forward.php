@@ -3,16 +3,26 @@ class ispconfig3_forward extends rcube_plugin
 {
     public $task = 'settings';
     public $EMAIL_ADDRESS_PATTERN = '([a-z0-9][a-z0-9\-\.\+\_]*@[a-z0-9]([a-z0-9\-][.]?)*[a-z0-9]\\.[a-z]{2,5})';
-    private $soap = null;
-    private $rcmail_inst = null;
-    private $required_plugins = array('ispconfig3_account');
+    private $soap;
+    private $rcmail_inst;
 
     function init()
     {
         $this->rcmail_inst = rcmail::get_instance();
         $this->add_texts('localization/', true);
-        $this->soap = new SoapClient(null, array('location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
-                                                 'uri'      => $this->rcmail_inst->config->get('soap_url')));
+        $this->require_plugin('ispconfig3_account');
+
+        $this->soap = new SoapClient(null, array(
+            'location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
+            'uri' => $this->rcmail_inst->config->get('soap_url'),
+            'stream_context' => stream_context_create(array(
+                'ssl' => array(
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true
+                )
+            ))
+        ));
 
         $this->register_action('plugin.ispconfig3_forward', array($this, 'init_html'));
         $this->register_action('plugin.ispconfig3_forward.save', array($this, 'save'));
@@ -37,12 +47,12 @@ class ispconfig3_forward extends rcube_plugin
 
     function save()
     {
-        $type = get_input_value('_type', RCUBE_INPUT_GET);
+        $type = rcube_utils::get_input_value('_type', rcube_utils::INPUT_GET);
 
         if ($type != 'del')
-            $address = strtolower(get_input_value('_forwardingaddress', RCUBE_INPUT_POST));
+            $address = strtolower(rcube_utils::get_input_value('_forwardingaddress', rcube_utils::INPUT_POST));
         else
-            $address = strtolower(get_input_value('_forwardingaddress', RCUBE_INPUT_GET));
+            $address = strtolower(rcube_utils::get_input_value('_forwardingaddress', rcube_utils::INPUT_GET));
 
         try
         {
@@ -58,17 +68,23 @@ class ispconfig3_forward extends rcube_plugin
                 $params = $mail_user[0];
                 unset($params['password']);
 
-                $startdate = array('year'   => substr($params['autoresponder_start_date'], 0, 4),
-                                   'month'  => substr($params['autoresponder_start_date'], 5, 2),
-                                   'day'    => substr($params['autoresponder_start_date'], 8, 2),
-                                   'hour'   => substr($params['autoresponder_start_date'], 11, 2),
-                                   'minute' => substr($params['autoresponder_start_date'], 14, 2));
+                $ispconfig_version = $this->soap->server_get_app_version($session_id);
+                if (version_compare($ispconfig_version['ispc_app_version'], '3.1dev', '<')) {
+                    $startdate = array('year'   => substr($params['autoresponder_start_date'], 0, 4),
+                        'month'  => substr($params['autoresponder_start_date'], 5, 2),
+                        'day'    => substr($params['autoresponder_start_date'], 8, 2),
+                        'hour'   => substr($params['autoresponder_start_date'], 11, 2),
+                        'minute' => substr($params['autoresponder_start_date'], 14, 2));
 
-                $enddate = array('year'   => substr($params['autoresponder_end_date'], 0, 4),
-                                 'month'  => substr($params['autoresponder_end_date'], 5, 2),
-                                 'day'    => substr($params['autoresponder_end_date'], 8, 2),
-                                 'hour'   => substr($params['autoresponder_end_date'], 11, 2),
-                                 'minute' => substr($params['autoresponder_end_date'], 14, 2));
+                    $enddate = array('year'   => substr($params['autoresponder_end_date'], 0, 4),
+                        'month'  => substr($params['autoresponder_end_date'], 5, 2),
+                        'day'    => substr($params['autoresponder_end_date'], 8, 2),
+                        'hour'   => substr($params['autoresponder_end_date'], 11, 2),
+                        'minute' => substr($params['autoresponder_end_date'], 14, 2));
+
+                    $params['autoresponder_end_date'] = $enddate;
+                    $params['autoresponder_start_date'] = $startdate;
+                }
 
                 if (empty($params['cc']))
                     $forward = $address;
@@ -85,8 +101,6 @@ class ispconfig3_forward extends rcube_plugin
                 }
 
                 $params['cc'] = $forward;
-                $params['autoresponder_end_date'] = $enddate;
-                $params['autoresponder_start_date'] = $startdate;
 
                 $update = $this->soap->mail_user_update($session_id, $uid, $mail_user[0]['mailuser_id'], $params);
 
@@ -114,12 +128,12 @@ class ispconfig3_forward extends rcube_plugin
 
         $this->rcmail_inst->output->set_env('framed', true);
 
-        $out .= '<fieldset><legend>' . $this->gettext('acc_forward') . '</legend>' . "\n";
+        $out = '<fieldset><legend>' . $this->gettext('acc_forward') . '</legend>' . "\n";
 
         $table = new html_table(array('cols' => 2, 'class' => 'propform'));
 
         $input_forwardingaddress = new html_inputfield(array('name' => '_forwardingaddress', 'id' => 'forwardingaddress', 'value' => '', 'maxlength' => 320, 'size' => 40));
-        $table->add('title', rep_specialchars_output($this->gettext('forwardingaddress')));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('forwardingaddress')));
         $table->add('', $input_forwardingaddress->show());
 
         $out .= $table->show();
@@ -144,6 +158,7 @@ class ispconfig3_forward extends rcube_plugin
             $session_id = $this->soap->login($this->rcmail_inst->config->get('remote_soap_user'), $this->rcmail_inst->config->get('remote_soap_pass'));
             $mail_user = $this->soap->mail_user_get($session_id, array('login' => $this->rcmail_inst->user->data['username']));
             $this->soap->logout($session_id);
+            $class = 'odd';
 
             $forward = explode(",", $mail_user[0]['cc']);
 
@@ -153,7 +168,7 @@ class ispconfig3_forward extends rcube_plugin
                 {
                     $class = ($class == 'odd' ? 'even' : 'odd');
 
-                    if ($forward[$i] == get_input_value('_forwardingaddress', RCUBE_INPUT_GET))
+                    if ($forward[$i] == rcube_utils::get_input_value('_forwardingaddress', rcube_utils::INPUT_GET))
                         $class = 'selected';
 
                     $rule_table->set_row_attribs(array('class' => $class, 'id' => 'rule_' . $forward[$i]));
@@ -162,7 +177,7 @@ class ispconfig3_forward extends rcube_plugin
             }
             else
             {
-                $rule_table->add(array('colspan' => '2'), rep_specialchars_output($this->gettext('forwardnomails')));
+                $rule_table->add(array('colspan' => '2'), rcube_utils::rep_specialchars_output($this->gettext('forwardnomails')));
                 $rule_table->set_row_attribs(array('class' => 'odd'));
                 $rule_table->add_row();
             }
@@ -190,5 +205,3 @@ class ispconfig3_forward extends rcube_plugin
         return $rule_table;
     }
 }
-
-?>

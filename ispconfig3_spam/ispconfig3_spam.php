@@ -2,16 +2,26 @@
 class ispconfig3_spam extends rcube_plugin
 {
     public $task = 'settings';
-    private $soap = null;
-    private $rcmail_inst = null;
-    private $required_plugins = array('ispconfig3_account');
+    private $soap;
+    private $rcmail_inst;
 
     function init()
     {
-        $this->add_texts('localization/', true);
         $this->rcmail_inst = rcmail::get_instance();
-        $this->soap = new SoapClient(null, array('location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
-                                                 'uri'      => $this->rcmail_inst->config->get('soap_url')));
+        $this->add_texts('localization/', true);
+        $this->require_plugin('ispconfig3_account');
+
+        $this->soap = new SoapClient(null, array(
+            'location' => $this->rcmail_inst->config->get('soap_url') . 'index.php',
+            'uri' => $this->rcmail_inst->config->get('soap_url'),
+            'stream_context' => stream_context_create(array(
+                'ssl' => array(
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'allow_self_signed' => true
+                )
+            ))
+        ));
 
         $this->register_action('plugin.ispconfig3_spam', array($this, 'init_html'));
         $this->register_action('plugin.ispconfig3_spam.save', array($this, 'save'));
@@ -36,8 +46,8 @@ class ispconfig3_spam extends rcube_plugin
 
     function save()
     {
-        $policy_id = get_input_value('_spampolicy_name', RCUBE_INPUT_POST);
-        $move_junk = get_input_value('_spammove', RCUBE_INPUT_POST);
+        $policy_id = rcube_utils::get_input_value('_spampolicy_name', rcube_utils::INPUT_POST);
+        $move_junk = rcube_utils::get_input_value('_spammove', rcube_utils::INPUT_POST);
 
         if (!$move_junk)
             $move_junk = 'n';
@@ -73,20 +83,24 @@ class ispconfig3_spam extends rcube_plugin
             $params = $mail_user[0];
             unset($params['password']);
 
-            $startdate = array('year'   => substr($params['autoresponder_start_date'], 0, 4),
-                               'month'  => substr($params['autoresponder_start_date'], 5, 2),
-                               'day'    => substr($params['autoresponder_start_date'], 8, 2),
-                               'hour'   => substr($params['autoresponder_start_date'], 11, 2),
-                               'minute' => substr($params['autoresponder_start_date'], 14, 2));
+            $ispconfig_version = $this->soap->server_get_app_version($session_id);
+            if (version_compare($ispconfig_version['ispc_app_version'], '3.1dev', '<')) {
+                $startdate = array('year'   => substr($params['autoresponder_start_date'], 0, 4),
+                    'month'  => substr($params['autoresponder_start_date'], 5, 2),
+                    'day'    => substr($params['autoresponder_start_date'], 8, 2),
+                    'hour'   => substr($params['autoresponder_start_date'], 11, 2),
+                    'minute' => substr($params['autoresponder_start_date'], 14, 2));
 
-            $enddate = array('year'   => substr($params['autoresponder_end_date'], 0, 4),
-                             'month'  => substr($params['autoresponder_end_date'], 5, 2),
-                             'day'    => substr($params['autoresponder_end_date'], 8, 2),
-                             'hour'   => substr($params['autoresponder_end_date'], 11, 2),
-                             'minute' => substr($params['autoresponder_end_date'], 14, 2));
+                $enddate = array('year'   => substr($params['autoresponder_end_date'], 0, 4),
+                    'month'  => substr($params['autoresponder_end_date'], 5, 2),
+                    'day'    => substr($params['autoresponder_end_date'], 8, 2),
+                    'hour'   => substr($params['autoresponder_end_date'], 11, 2),
+                    'minute' => substr($params['autoresponder_end_date'], 14, 2));
 
-            $params['autoresponder_end_date'] = $enddate;
-            $params['autoresponder_start_date'] = $startdate;
+                $params['autoresponder_end_date'] = $enddate;
+                $params['autoresponder_start_date'] = $startdate;
+            }
+
             $params['move_junk'] = $move_junk;
 
             $update = $this->soap->mail_user_update($session_id, $uid, $mail_user[0]['mailuser_id'], $params);
@@ -111,8 +125,8 @@ class ispconfig3_spam extends rcube_plugin
             $session_id = $this->soap->login($this->rcmail_inst->config->get('remote_soap_user'), $this->rcmail_inst->config->get('remote_soap_pass'));
             $mail_user = $this->soap->mail_user_get($session_id, array('login' => $this->rcmail_inst->user->data['username']));
             $spam_user = $this->soap->mail_spamfilter_user_get($session_id, array('email' => $mail_user[0]['email']));
-            $policy = $this->soap->mail_policy_get($session_id, array(1 => 1));
-            $policy_sel = $this->soap->mail_policy_get($session_id, array("id" => $spam_user[0]['policy_id']));
+            $policy = $this->soap->mail_policy_get($session_id, array());
+            $policy_sel = $this->soap->mail_policy_get($session_id, array('id' => $spam_user[0]['policy_id']));
             $this->soap->logout($session_id);
 
             for ($i = 0; $i < count($policy); $i++)
@@ -134,17 +148,17 @@ class ispconfig3_spam extends rcube_plugin
 
         $this->rcmail_inst->output->set_env('framed', true);
 
-        $out .= '<fieldset><legend>' . $this->gettext('junk') . '</legend>' . "\n";
+        $out = '<fieldset><legend>' . $this->gettext('junk') . '</legend>' . "\n";
 
         $table = new html_table(array('cols' => 2, 'class' => 'propform'));
 
         $input_spampolicy_name = new html_select(array('name' => '_spampolicy_name', 'id' => 'spampolicy_name'));
         $input_spampolicy_name->add($policy_name, $policy_id);
-        $table->add('title', rep_specialchars_output($this->gettext('policy_name')));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('policy_name')));
         $table->add('', $input_spampolicy_name->show($policy_sel[0]['policy_name']));
 
         $input_spammove = new html_checkbox(array('name' => '_spammove', 'id' => 'spammove', 'value' => '1'));
-        $table->add('title', rep_specialchars_output($this->gettext('spammove')));
+        $table->add('title', rcube_utils::rep_specialchars_output($this->gettext('spammove')));
         $table->add('', $input_spammove->show($enabled));
 
         $out .= $table->show();
@@ -170,7 +184,8 @@ class ispconfig3_spam extends rcube_plugin
             $session_id = $this->soap->login($this->rcmail_inst->config->get('remote_soap_user'), $this->rcmail_inst->config->get('remote_soap_pass'));
             $mail_user = $this->soap->mail_user_get($session_id, array('login' => $this->rcmail_inst->user->data['username']));
             $spam_user = $this->soap->mail_spamfilter_user_get($session_id, array('email' => $mail_user[0]['email']));
-            $policies = $this->soap->mail_policy_get($session_id, array(1 => 1));
+            $policies = $this->soap->mail_policy_get($session_id, array());
+            $class = 'odd';
 
             for ($i = 0; $i < count($policies); $i++)
             {
@@ -181,7 +196,8 @@ class ispconfig3_spam extends rcube_plugin
 
                 $spam_table->set_row_attribs(array('class' => $class));
 
-                $this->_spam_row($spam_table, $policies[$i]['policy_name'], $policies[$i]['spam_tag_level'], $policies[$i]['spam_tag2_level'], $policies[$i]['spam_kill_level'], $attrib);
+                $this->_spam_row($spam_table, $policies[$i]['policy_name'], $policies[$i]['spam_tag_level'],
+                    $policies[$i]['spam_tag2_level'], $policies[$i]['spam_kill_level'], $attrib);
             }
 
             $this->soap->logout($session_id);
@@ -192,7 +208,7 @@ class ispconfig3_spam extends rcube_plugin
 
         if (count($policies) == 0)
         {
-            $spam_table->add(array('colspan' => '4'), rep_specialchars_output($this->gettext('spamnopolicies')));
+            $spam_table->add(array('colspan' => '4'), rcube_utils::rep_specialchars_output($this->gettext('spamnopolicies')));
             $spam_table->set_row_attribs(array('class' => 'odd'));
             $spam_table->add_row();
         }
@@ -213,5 +229,3 @@ class ispconfig3_spam extends rcube_plugin
         return $spam_table;
     }
 }
-
-?>
